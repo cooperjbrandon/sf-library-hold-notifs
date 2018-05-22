@@ -43,7 +43,7 @@ And uncomment in this line
 ```
 go();
 ```
-Then fill out `secrets.json`. Then run
+Then fill out `secrets.json`. (See `secrets-example.json` for correct structure of the secrets file). Then run
 
 ```
 node index.js
