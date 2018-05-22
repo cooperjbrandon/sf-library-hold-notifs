@@ -23,7 +23,7 @@ This repo uses the following packages:
 ### Prerequisites
 
 This package assumes you have the following accounts:
-firebase, mailgun, sb library (obviously), and aws.
+firebase, mailgun, sf library (obviously), and aws.
 
 ### Installing
 
