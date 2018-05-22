@@ -4,6 +4,7 @@
 const cheerio = require('cheerio');
 const firebase = require('firebase-admin');
 const mg = require('mailgun-js');
+const moment = require('moment');
 
 ////////////////////////
 /// load local files ///
@@ -28,9 +29,9 @@ const db = firebase.database();
 
 const mailgun = mg({ apiKey, domain });
 
-/////////////////
-/// functions ///
-/////////////////
+//////////////////////////
+/// exported functions ///
+//////////////////////////
 const loginAndGetCookie = async () => {
   console.log('loginAndGetCookie');
 
@@ -51,6 +52,7 @@ const loginAndGetCookie = async () => {
 
 const fetchHoldsPage = async (cookies) => {
   console.log('fetchHoldsPage');
+
   try {
     const url = 'https://sfpl.bibliocommons.com/holds/index/not_yet_available';
     const method = 'GET';
@@ -66,6 +68,7 @@ const fetchHoldsPage = async (cookies) => {
 
 const parseBodyForBooks = (body) => {
   console.log('parseBodyForBooks');
+
   const $ = cheerio.load(body);
   let booksOnHold = [];
 
@@ -85,33 +88,67 @@ const retrieveCurrentHoldsFromDB = async () => {
   return books.val() || [];
 }
 
-const addPositionChangeData = (holdsFromDB, booksOnHold) => {
-  console.log('addPositionChangeData');
-  let weeklyNotificationData = [];
-  for (let book of booksOnHold) {
-    let bookFromDB = holdsFromDB.find((bookToCheck) => {
-      return bookToCheck.title === book.title;
-    });
+const decorateData = (holdsFromDB, booksOnHold) => {
+  console.log('decorateData');
 
-    let positionChange, positionChangeFromLastWeek;
+  let weeklyNotificationData = {};
+  for (let book of booksOnHold) {
+
+    const keyName = getKeyName(book.title);
+    const bookFromDB = holdsFromDB[keyName];
+
+    let positionChange, positionChangeFromLastUpdate;
     if (bookFromDB) {
-      positionChangeFromLastWeek = bookFromDB.position - book.position;
-      let spotText = positionChangeFromLastWeek === 1 ? 'spot' : 'spots';
-      positionChange = `This book moved up ${positionChangeFromLastWeek} ${spotText} from last week.`
+      positionChangeFromLastUpdate = bookFromDB.position - book.position;
+      positionChange = getPositionChangeText(bookFromDB, positionChangeFromLastUpdate);
     } else {
-      positionChangeFromLastWeek = 0;
+      positionChangeFromLastUpdate = 0;
       positionChange = 'Newly added in the last week.';
     }
 
-    weeklyNotificationData.push({ ...book, positionChange, positionChangeFromLastWeek });
+    weeklyNotificationData[keyName] = {
+      ...book,
+      positionChange,
+      positionChangeFromLastUpdate,
+      lastUpdated: new Date().toString()
+    };
   }
 
   return weeklyNotificationData;
 }
 
+const retrieveHighAlertHolds = (holdsFromDB, booksOnHold) => {
+  console.log('retrieveHighAlertHolds');
+
+  let highAlertData = {};
+  for (let book of booksOnHold) {
+
+    const keyName = getKeyName(book.title);
+    const bookFromDB = holdsFromDB[keyName];
+
+    const positionChangeFromLastUpdate = bookFromDB ? bookFromDB.position - book.position : 0;
+
+    // only keep going in this loop if the position has changed and the book's position is <= 5
+    const canKeepGoing = positionChangeFromLastUpdate > 0 && book.position <= 5;
+    if (!canKeepGoing) { continue; }
+
+    const positionChange = getPositionChangeText(bookFromDB, positionChangeFromLastUpdate);
+    highAlertData[keyName] = {
+      ...book,
+      positionChange,
+      positionChangeFromLastUpdate,
+      lastUpdated: new Date().toString()
+    };
+  }
+
+  return highAlertData;
+}
+
 const updateDatabase = async (booksForNotification) => {
   console.log('updateDatabase');
+
   try {
+    // completely overwrite the books for this user
     await db.ref('users/brandon/books').set(booksForNotification);
   } catch (error) {
     console.log(error);
@@ -120,14 +157,14 @@ const updateDatabase = async (booksForNotification) => {
 
 const sendNotification = async (booksForNotification) => {
   console.log('sendNotification');
+
   try {
     let data = {
       from: `Hello From Brandon <ignore@${domain}>`,
-      // to: 'malloryannrossen@gmail.com, cooperjbrandon@gmail.com',
       to: 'cooperjbrandon@gmail.com',
       subject: 'Your Weekly SF Library Hold Notifications',
-      text: JSON.stringify(booksForNotification),
-      html: formatEmail(booksForNotification)
+      text: formatEmailText(booksForNotification),
+      html: formatEmailHtml(booksForNotification)
     };
 
     return mailgun.messages().send(data);
@@ -136,16 +173,67 @@ const sendNotification = async (booksForNotification) => {
   }
 }
 
-const formatEmail = (booksForNotification) => {
-  let body = '';
+const updatDatabaseForHighAlerts = async (booksForHighAlertNotification) => {
+  console.log('updatDatabaseForHighAlerts');
 
-  for (let book of booksForNotification) {
+  try {
+    // only update the necessary books for this user
+    await db.ref('users/brandon/books').update(booksForHighAlertNotification);
+  } catch (error) {
+    console.log(error);
+  }
+}
+
+const sendNotificationForHighAlerts = async (booksForHighAlertNotification) => {
+  console.log('sendNotificationForHighAlerts');
+
+  if (!Object.keys(booksForHighAlertNotification).length) { return Promise.resolve(); }
+
+  try {
+    let data = {
+      from: `Hello From Brandon <ignore@${domain}>`,
+      to: 'cooperjbrandon@gmail.com',
+      subject: 'High Alert - SF Library Hold Notifications',
+      text: formatEmailText(booksForHighAlertNotification),
+      html: formatEmailHtml(booksForHighAlertNotification)
+    };
+
+    return mailgun.messages().send(data);
+  } catch (error) {
+    console.log(error);
+  }
+}
+
+
+////////////////////////
+/// Helper functions ///
+////////////////////////
+
+const getKeyName = (title) => {
+  return title.split('.').join('___');
+}
+
+const getPositionChangeText = (bookFromDB, positionChangeFromLastUpdate) => {
+  let spotText = positionChangeFromLastUpdate === 1 ? 'spot' : 'spots';
+  let fromText = moment(new Date(bookFromDB.lastUpdated)).fromNow();
+  return `This book has moved up ${positionChangeFromLastUpdate} ${spotText} from ${fromText}.`
+}
+
+const formatEmailText = (booksForNotification) => {
+  return Object.keys(booksForNotification).length ? JSON.stringify(booksForNotification) : 'You have no current holds.';
+}
+
+const formatEmailHtml = (booksForNotification) => {
+  let body = Object.keys(booksForNotification).length ? '' : 'You have no current holds.';
+
+  for (let bookKeyName of Object.keys(booksForNotification)) {
+    let book = booksForNotification[bookKeyName];
     let title = `<p><b>${book.title}</b></p>`;
     let list = `
       <ul>
         <li>Current Position: ${book.position}</li>
         <li>Change: ${book.positionChange}</li>
-        <li>Position Text: ${book.positionText}</li>
+        <li>Info: ${book.positionText}</li>
       </ul>
     `;
     body += title;
@@ -163,7 +251,10 @@ module.exports = {
   fetchHoldsPage,
   parseBodyForBooks,
   retrieveCurrentHoldsFromDB,
-  addPositionChangeData,
+  decorateData,
+  retrieveHighAlertHolds,
   updateDatabase,
   sendNotification,
+  updatDatabaseForHighAlerts,
+  sendNotificationForHighAlerts
 };

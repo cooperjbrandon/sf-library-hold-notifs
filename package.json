@@ -4,11 +4,12 @@
   "description": "",
   "main": "index.js",
   "engines": {
-    "node" : "8.11.1"
+    "node": "8.11.1"
   },
   "dependencies": {
     "cheerio": "^1.0.0-rc.2",
     "firebase-admin": "^5.12.1",
-    "mailgun-js": "^0.18.0"
+    "mailgun-js": "^0.18.0",
+    "moment": "^2.22.1"
   }
 }
