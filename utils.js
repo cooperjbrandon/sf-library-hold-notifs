@@ -11,8 +11,6 @@ const moment = require('moment');
 ////////////////////////
 const fetch = require('./fetch');
 const {
-  username,
-  password,
   mailgunSecrets: { apiKey, domain },
   firebaseServiceAccount
 } = require('./secrets');
@@ -32,7 +30,7 @@ const mailgun = mg({ apiKey, domain });
 //////////////////////////
 /// exported functions ///
 //////////////////////////
-const loginAndGetCookie = async () => {
+const loginAndGetCookie = async (username, password) => {
   console.log('loginAndGetCookie');
 
   try {
@@ -76,15 +74,16 @@ const parseBodyForBooks = (body) => {
     let title = $(element).find('.title.title_extended a').attr('title');
     let position = $(element).find('.hold_position strong').text().slice(1); // (slice strips the pound symbol). #5 => 5; or #13 => 13
     let positionText = $(element).find('.hold_position').text().trim();
-    booksOnHold.push({title, position: parseInt(position), positionText});
+    position = position ? parseInt(position) : ''; // edge case when there is no position (when it just says PROCESSING HOLD)
+    booksOnHold.push({title, position, positionText});
   });
 
   return booksOnHold;
 };
 
-const retrieveCurrentHoldsFromDB = async () => {
+const retrieveCurrentHoldsFromDB = async (name) => {
   console.log('retrieveCurrentHoldsFromDB');
-  const books = await db.ref('users/brandon/books').once('value');
+  const books = await db.ref(`users/${name}/books`).once('value');
   return books.val() || [];
 }
 
@@ -99,7 +98,7 @@ const decorateData = (holdsFromDB, booksOnHold) => {
 
     let positionChange, positionChangeFromLastUpdate;
     if (bookFromDB) {
-      positionChangeFromLastUpdate = bookFromDB.position - book.position;
+      positionChangeFromLastUpdate = bookFromDB.position && book.position ? bookFromDB.position - book.position : 0;
       positionChange = getPositionChangeText(bookFromDB, positionChangeFromLastUpdate);
     } else {
       positionChangeFromLastUpdate = 0;
@@ -126,7 +125,7 @@ const retrieveHighAlertHolds = (holdsFromDB, booksOnHold) => {
     const keyName = getKeyName(book.title);
     const bookFromDB = holdsFromDB[keyName];
 
-    const positionChangeFromLastUpdate = bookFromDB ? bookFromDB.position - book.position : 0;
+    const positionChangeFromLastUpdate = bookFromDB && bookFromDB.position && book.position ? bookFromDB.position - book.position : 0;
 
     // only keep going in this loop if the position has changed and the book's position is <= 5
     const canKeepGoing = positionChangeFromLastUpdate > 0 && book.position <= 5;
@@ -144,24 +143,24 @@ const retrieveHighAlertHolds = (holdsFromDB, booksOnHold) => {
   return highAlertData;
 }
 
-const updateDatabase = async (booksForNotification) => {
+const updateDatabase = async (booksForNotification, name) => {
   console.log('updateDatabase');
 
   try {
     // completely overwrite the books for this user
-    await db.ref('users/brandon/books').set(booksForNotification);
+    await db.ref(`users/${name}/books`).set(booksForNotification);
   } catch (error) {
     console.log(error);
   }
 }
 
-const sendNotification = async (booksForNotification) => {
+const sendNotification = async (booksForNotification, email) => {
   console.log('sendNotification');
 
   try {
     let data = {
       from: `Hello From Brandon <ignore@${domain}>`,
-      to: 'cooperjbrandon@gmail.com',
+      to: email,
       subject: 'Your Weekly SF Library Hold Notifications',
       text: formatEmailText(booksForNotification),
       html: formatEmailHtml(booksForNotification)
@@ -173,18 +172,18 @@ const sendNotification = async (booksForNotification) => {
   }
 }
 
-const updatDatabaseForHighAlerts = async (booksForHighAlertNotification) => {
+const updatDatabaseForHighAlerts = async (booksForHighAlertNotification, name) => {
   console.log('updatDatabaseForHighAlerts');
 
   try {
     // only update the necessary books for this user
-    await db.ref('users/brandon/books').update(booksForHighAlertNotification);
+    await db.ref(`users/${name}/books`).update(booksForHighAlertNotification);
   } catch (error) {
     console.log(error);
   }
 }
 
-const sendNotificationForHighAlerts = async (booksForHighAlertNotification) => {
+const sendNotificationForHighAlerts = async (booksForHighAlertNotification, email) => {
   console.log('sendNotificationForHighAlerts');
 
   if (!Object.keys(booksForHighAlertNotification).length) { return Promise.resolve(); }
@@ -192,7 +191,7 @@ const sendNotificationForHighAlerts = async (booksForHighAlertNotification) => {
   try {
     let data = {
       from: `Hello From Brandon <ignore@${domain}>`,
-      to: 'cooperjbrandon@gmail.com',
+      to: email,
       subject: 'High Alert - SF Library Hold Notifications',
       text: formatEmailText(booksForHighAlertNotification),
       html: formatEmailHtml(booksForHighAlertNotification)
