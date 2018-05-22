@@ -19,7 +19,11 @@ const go = async () => {
   await updateDatabase(booksForNotification);
   await sendNotification(booksForNotification);
 
-  process.exit()
+  return;
 }
 
-go();
+// for aws lamdba:
+exports.handler = go;
+
+// when testing locally:
+// go();
