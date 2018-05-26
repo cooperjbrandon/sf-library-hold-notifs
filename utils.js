@@ -203,6 +203,11 @@ const sendNotificationForHighAlerts = async (booksForHighAlertNotification, emai
   }
 }
 
+const logBooksForRecordKeeping = (name, holdsFromDB, booksOnHold) => {
+  console.log(`${name} holds from DB: ${JSON.stringify(holdsFromDB, null, 4)}`);
+  console.log(`${name} current holds from library: ${JSON.stringify(booksOnHold, null, 4)}`);
+}
+
 
 ////////////////////////
 /// Helper functions ///
@@ -255,5 +260,6 @@ module.exports = {
   updateDatabase,
   sendNotification,
   updatDatabaseForHighAlerts,
-  sendNotificationForHighAlerts
+  sendNotificationForHighAlerts,
+  logBooksForRecordKeeping
 };

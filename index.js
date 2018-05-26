@@ -9,7 +9,8 @@ const {
   updateDatabase,
   sendNotification,
   updatDatabaseForHighAlerts,
-  sendNotificationForHighAlerts
+  sendNotificationForHighAlerts,
+  logBooksForRecordKeeping
 } = require('./utils');
 const {
   libraryUsers
@@ -20,6 +21,7 @@ const performNotifs = async (user) => {
   const body = await fetchHoldsPage(cookies);
   const holdsFromDB = await retrieveCurrentHoldsFromDB(user.name);
   const booksOnHold = parseBodyForBooks(body);
+  logBooksForRecordKeeping(user.name, holdsFromDB, booksOnHold);
 
   if (moment().format('dddd') === 'Monday') {
     // do normal monday morning notification
